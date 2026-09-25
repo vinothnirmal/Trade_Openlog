@@ -246,7 +246,12 @@ REFUSALS = [
     ("lots sent as a boolean", {"legs": [leg(lots=True)]}, "whole number"),
     ("an options leg with no option_type", {"legs": [leg(option_type=None)]}, "option_type"),
     ("an unknown option_type", {"legs": [leg(option_type="CALL")]}, "option_type"),
-    ("an unknown strike_mode", {"legs": [leg(strike_mode="delta")]}, "strike_mode"),
+    ("an unknown strike_mode", {"legs": [leg(strike_mode="gamma")]}, "strike_mode"),
+    (
+        "a delta mode without a target",
+        {"legs": [leg(strike_mode="delta", atm_offset=None, target_delta=None)]},
+        "target_delta",
+    ),
     ("an unknown atm_offset", {"legs": [leg(atm_offset="OTM6")]}, "atm_offset"),
     ("an atm_offset that is not one of ours", {"legs": [leg(atm_offset="ATM+1")]}, "atm_offset"),
     ("a missing expiry", {"legs": [leg(expiry=None)]}, "expiry"),

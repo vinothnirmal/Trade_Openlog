@@ -151,11 +151,13 @@ function StrikePickerDialog({
     strikes,
     resolvedExpiry: chainExpiry,
     exchange,
+    deltas,
     isLoading,
     error,
   } = useOptionStrikes(underlying, underlyingExchange, resolvedExpiry, open)
 
   const filtered = filterStrikes(strikes, filter)
+  const deltaFor = deltas[optionType]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -210,11 +212,18 @@ function StrikePickerDialog({
                       )}
                     >
                       <span className="font-mono">{strike}</span>
-                      {selectedStrike === strike && (
-                        <Badge variant="secondary" className="text-[10px]">
-                          selected
-                        </Badge>
-                      )}
+                      <span className="flex items-center gap-2">
+                        {deltaFor[String(strike)] != null && (
+                          <span className="text-xs text-muted-foreground">
+                            delta {deltaFor[String(strike)]?.toFixed(3)}
+                          </span>
+                        )}
+                        {selectedStrike === strike && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            selected
+                          </Badge>
+                        )}
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -297,6 +306,7 @@ function LegCard({
                   strike_mode: strikeMode,
                   atm_offset: strikeMode === 'atm' ? (leg.atm_offset ?? 'ATM') : null,
                   strike: strikeMode === 'strike' ? (leg.strike ?? null) : null,
+                  target_delta: strikeMode === 'delta' ? (leg.target_delta ?? null) : null,
                 })
               }}
               className={SELECT_CLASS_SM}
@@ -410,7 +420,7 @@ function LegCard({
             <div className="space-y-1.5">
               <Label className="text-xs uppercase">Strike mode</Label>
               <div className="flex h-9 overflow-hidden rounded-md border border-input">
-                {(['atm', 'strike'] as const).map((mode) => (
+                {(['atm', 'strike', 'delta'] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -420,6 +430,7 @@ function LegCard({
                         strike_mode: mode,
                         atm_offset: mode === 'atm' ? (leg.atm_offset ?? 'ATM') : null,
                         strike: mode === 'strike' ? (leg.strike ?? null) : null,
+                        target_delta: mode === 'delta' ? (leg.target_delta ?? null) : null,
                       })
                     }
                     className={cn(
@@ -429,7 +440,11 @@ function LegCard({
                         : 'bg-background hover:bg-muted'
                     )}
                   >
-                    {mode === 'atm' ? 'ATM-relative' : 'Direct strike'}
+                    {mode === 'atm'
+                      ? 'ATM-relative'
+                      : mode === 'strike'
+                        ? 'Direct strike'
+                        : 'Closest delta'}
                   </button>
                 ))}
               </div>
@@ -450,7 +465,7 @@ function LegCard({
                   ))}
                 </select>
               </div>
-            ) : (
+            ) : leg.strike_mode === 'strike' ? (
               <div className="space-y-1.5 sm:col-span-2">
                 <Label className="text-xs uppercase">Strike value</Label>
                 <div className="flex gap-2">
@@ -468,6 +483,28 @@ function LegCard({
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Filtered by underlying + resolved expiry rank ({leg.expiry}).
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs uppercase">Target delta</Label>
+                <Input
+                  type="number"
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  value={leg.target_delta ?? ''}
+                  placeholder={leg.option_type === 'PE' ? '-0.25' : '0.25'}
+                  onChange={(event) =>
+                    update(
+                      'target_delta',
+                      event.target.value === '' ? null : Number.parseFloat(event.target.value)
+                    )
+                  }
+                  className="h-9 font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Calls use positive delta; puts use negative delta.
                 </p>
               </div>
             )}

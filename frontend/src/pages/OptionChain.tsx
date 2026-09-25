@@ -145,6 +145,22 @@ function calculateTotals(chain: OptionStrike[]): {
   return { ceVolume, peVolume, ceOi, peOi }
 }
 
+function findClosestDelta(
+  chain: OptionStrike[],
+  optionType: 'ce' | 'pe',
+  targetDelta: number
+): { strike: number; delta: number } | null {
+  const candidates = chain.flatMap((row) => {
+    const delta = row[optionType]?.delta
+    return typeof delta === 'number' && Number.isFinite(delta)
+      ? [{ strike: row.strike, delta, distance: Math.abs(delta - targetDelta) }]
+      : []
+  })
+
+  if (candidates.length === 0) return null
+  return candidates.sort((a, b) => a.distance - b.distance || a.strike - b.strike)[0]
+}
+
 function getMaxValue(chain: OptionStrike[], dataSource: BarDataSource): number {
   let maxVal = 0
   chain.forEach((strike) => {
@@ -751,6 +767,13 @@ export default function OptionChain() {
       data?.chain ? calculateTotals(data.chain) : { ceVolume: 0, peVolume: 0, ceOi: 0, peOi: 0 },
     [data?.chain]
   )
+  const closestDelta = useMemo(
+    () => ({
+      ce: data?.chain ? findClosestDelta(data.chain, 'ce', 0.25) : null,
+      pe: data?.chain ? findClosestDelta(data.chain, 'pe', -0.25) : null,
+    }),
+    [data?.chain]
+  )
   const maxBarValue = useMemo(
     () => (data?.chain ? getMaxValue(data.chain, barDataSource) : 1),
     [data?.chain, barDataSource]
@@ -902,7 +925,7 @@ export default function OptionChain() {
 
       {data && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Card>
               <CardContent className="p-4">
                 <div className="text-sm text-muted-foreground">{selectedUnderlying} Spot</div>
@@ -919,6 +942,34 @@ export default function OptionChain() {
                 <div className="text-sm text-muted-foreground">ATM Strike</div>
                 <div className="text-2xl font-bold">{data.atm_strike}</div>
                 <div className="text-xs text-muted-foreground">Expiry: {data.expiry_date}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Closest Delta</div>
+                <div className="mt-1 space-y-1 font-mono text-sm tabular-nums">
+                  <div>
+                    <span className="mr-2 text-green-500">CE 0.25</span>
+                    {closestDelta.ce ? (
+                      <span>
+                        {closestDelta.ce.strike} ({closestDelta.ce.delta.toFixed(3)})
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="mr-2 text-red-500">PE -0.25</span>
+                    {closestDelta.pe ? (
+                      <span>
+                        {closestDelta.pe.strike} ({closestDelta.pe.delta.toFixed(3)})
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">strike (actual delta)</div>
               </CardContent>
             </Card>
             <Card>

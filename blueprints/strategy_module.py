@@ -194,7 +194,7 @@ TAB_SEGMENTS = {
 
 LEG_POSITIONS = ("B", "S")
 LEG_OPTION_TYPES = ("CE", "PE")
-LEG_STRIKE_MODES = ("atm", "strike")
+LEG_STRIKE_MODES = ("atm", "strike", "delta")
 LEG_EXPIRIES = ("weekly", "next_week", "monthly", "next_month", "current", "next")
 
 #: A strike named relative to the money. Five steps either side is what the
@@ -224,6 +224,7 @@ LEG_FIELDS = (
     "strike_mode",
     "atm_offset",
     "strike",
+    "target_delta",
     "expiry",
     "sl_pts",
     "target_pts",
@@ -646,7 +647,7 @@ def _validate_leg(raw: Any, index: int) -> dict:
     # Fields that only mean something for an options leg. Accepting them on a
     # futures leg and then ignoring them is how a strategy ends up looking
     # correct in the editor and trading something else.
-    options_only = ("option_type", "strike_mode", "atm_offset", "strike")
+    options_only = ("option_type", "strike_mode", "atm_offset", "strike", "target_delta")
     if segment == "options":
         clean["option_type"] = _choice(
             _required(leg, "option_type", label), LEG_OPTION_TYPES, f"{label}.option_type"
@@ -664,7 +665,7 @@ def _validate_leg(raw: Any, index: int) -> dict:
             clean["atm_offset"] = _choice(
                 leg.get("atm_offset") or "ATM", ATM_OFFSETS, f"{label}.atm_offset"
             )
-        else:
+        elif strike_mode == "strike":
             if leg.get("atm_offset") is not None:
                 raise ValidationError(
                     f"{label}.atm_offset is only used when strike_mode is 'atm'. "
@@ -676,6 +677,21 @@ def _validate_leg(raw: Any, index: int) -> dict:
             clean["strike"] = _number(
                 _required(leg, "strike", label), f"{label}.strike", greater_than=0
             )
+        else:
+            for field in ("atm_offset", "strike"):
+                if leg.get(field) is not None:
+                    raise ValidationError(
+                        f"{label}.{field} is only used when strike_mode is 'atm' or 'strike'."
+                    )
+            target_delta = _number(
+                _required(leg, "target_delta", label),
+                f"{label}.target_delta",
+                minimum=-1,
+                maximum=1,
+            )
+            if target_delta == 0:
+                raise ValidationError(f"{label}.target_delta cannot be zero")
+            clean["target_delta"] = target_delta
     else:
         for field in options_only:
             if leg.get(field) is not None:

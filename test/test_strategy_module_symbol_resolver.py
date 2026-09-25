@@ -409,6 +409,61 @@ class TestAtmOffsets:
         assert market.strike_calls == [], "the listed-strike path was not needed"
 
 
+class TestDeltaSelection:
+    def test_selects_the_closest_live_call_delta(self, market, monkeypatch):
+        from services import option_chain_service
+
+        monkeypatch.setattr(
+            option_chain_service,
+            "get_option_chain",
+            lambda **kwargs: (
+                True,
+                {
+                    "underlying_ltp": NIFTY_LTP,
+                    "chain": [
+                        {"strike": 23500, "ce": {"delta": 0.63}},
+                        {"strike": 23600, "ce": {"delta": 0.51}},
+                        {"strike": 23700, "ce": {"delta": 0.38}},
+                    ],
+                },
+                200,
+            ),
+        )
+        leg = resolve_leg(
+            option_leg(strike_mode="delta", target_delta=0.5), "NIFTY", "NSE_INDEX"
+        )
+        assert leg.ok, leg.error
+        assert leg.strike == 23600
+        assert leg.detail["selected_delta"] == 0.51
+
+    def test_selects_the_closest_live_put_delta(self, market, monkeypatch):
+        from services import option_chain_service
+
+        monkeypatch.setattr(
+            option_chain_service,
+            "get_option_chain",
+            lambda **kwargs: (
+                True,
+                {
+                    "underlying_ltp": NIFTY_LTP,
+                    "chain": [
+                        {"strike": 23500, "pe": {"delta": -0.38}},
+                        {"strike": 23600, "pe": {"delta": -0.49}},
+                        {"strike": 23700, "pe": {"delta": -0.64}},
+                    ],
+                },
+                200,
+            ),
+        )
+        leg = resolve_leg(
+            option_leg(option_type="PE", strike_mode="delta", target_delta=-0.5),
+            "NIFTY",
+            "NSE_INDEX",
+        )
+        assert leg.ok, leg.error
+        assert leg.strike == 23600
+
+
 class TestFractionalStrikes:
     """VEDL25APR24292.5CE is a real contract. An int() anywhere loses it."""
 

@@ -1552,6 +1552,11 @@ export function useExpiryResolution(
 export interface OptionStrikes {
   /** Listed strikes for the expiry, ascending. */
   strikes: number[]
+  /** Live delta for each listed strike, keyed by its numeric string form. */
+  deltas: {
+    CE: Record<string, number | null>
+    PE: Record<string, number | null>
+  }
   atmStrike: number | null
   /** The expiry the platform resolved the request to. */
   resolvedExpiry: string | null
@@ -1584,7 +1589,8 @@ export function useOptionStrikes(
         underlying,
         underlyingExchange,
         normalizeExpiryCode(expiryDate as string),
-        STRIKE_COUNT
+        STRIKE_COUNT,
+        { withGreeks: true }
       )
       if (response.status !== 'success') {
         throw new Error(response.message || 'The option chain came back empty.')
@@ -1597,10 +1603,15 @@ export function useOptionStrikes(
   })
 
   const chain = query.data?.chain ?? []
+  const deltas = {
+    CE: Object.fromEntries(chain.map((row) => [String(row.strike), row.ce?.delta ?? null])),
+    PE: Object.fromEntries(chain.map((row) => [String(row.strike), row.pe?.delta ?? null])),
+  }
   return {
     strikes: Array.from(new Set(chain.map((row) => row.strike)))
       .filter((strike) => Number.isFinite(strike))
       .sort((a, b) => a - b),
+    deltas,
     atmStrike: query.data?.atm_strike ?? null,
     resolvedExpiry: query.data?.expiry_date ?? null,
     exchange: query.data?.underlying_exchange || underlyingExchange,

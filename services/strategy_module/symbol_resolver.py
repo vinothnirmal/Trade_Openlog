@@ -60,7 +60,7 @@ EXPIRY_RANKS = ("weekly", "next_week", "monthly", "next_month", "current", "next
 SEGMENTS = ("cash", "futures", "options")
 
 #: How an option leg names its strike.
-STRIKE_MODES = ("atm", "strike")
+STRIKE_MODES = ("atm", "strike", "delta")
 
 #: Offsets from the money, in strike steps. Bounded at five because a basket
 #: that reaches further than that is nearly always a typo, and an unbounded
@@ -841,6 +841,60 @@ def _resolve_atm_strike(
     return atm_strike, target, None, None
 
 
+def _resolve_delta_strike(
+    base_symbol: str,
+    underlying_exchange: str,
+    expiry_symbol: str,
+    option_type: str,
+    target_delta: float,
+    api_key: str | None,
+) -> tuple[float | None, float | None, float | None, str | None, str | None]:
+    """Return the listed strike whose live chain delta is closest to target."""
+    from services.option_chain_service import get_option_chain
+
+    success, response, _status = get_option_chain(
+        underlying=base_symbol,
+        exchange=underlying_exchange,
+        expiry_date=expiry_symbol,
+        strike_count=None,
+        api_key=api_key,
+        with_quotes=True,
+        with_greeks=True,
+    )
+    if not success:
+        return (
+            None,
+            None,
+            None,
+            (response or {}).get("message", "Could not fetch option chain."),
+            "delta_chain_failed",
+        )
+
+    data = response or {}
+    side = "ce" if option_type == "CE" else "pe"
+    candidates = []
+    for row in data.get("chain", []):
+        try:
+            strike = float(row["strike"])
+            delta = float((row.get(side) or {}).get("delta"))
+            if math.isfinite(strike) and math.isfinite(delta):
+                candidates.append((abs(delta - target_delta), strike, delta))
+        except (TypeError, ValueError):
+            continue
+
+    if not candidates:
+        return (
+            None,
+            None,
+            None,
+            f"No usable {option_type} deltas were returned for {base_symbol} expiring {expiry_symbol}.",
+            "no_delta_data",
+        )
+
+    _distance, strike, selected_delta = min(candidates, key=lambda item: (item[0], item[1]))
+    return strike, selected_delta, data.get("underlying_ltp"), None, None
+
+
 def resolve_leg(
     leg: Mapping[str, Any],
     underlying: str,
@@ -862,11 +916,14 @@ def resolve_leg(
                             literal date ("28-MAY-26" or "28MAY26"). Futures
                             and options only; default "current".
             ``option_type`` "CE" or "PE". Options only.
-            ``strike_mode`` "atm" or "strike". Options only, default "atm".
+            ``strike_mode`` "atm", "strike" or "delta". Options only, default
+                            "atm".
             ``atm_offset``  "ATM", "ITM1".."ITM5", "OTM1".."OTM5", default
                             "ATM". Used when ``strike_mode`` is "atm".
             ``strike``      An absolute strike, fractional allowed. Used when
                             ``strike_mode`` is "strike".
+            ``target_delta`` A signed target delta in [-1, 1]. Used when
+                            ``strike_mode`` is "delta".
             ``strike_int``  Optional strike interval. Supplying it switches the
                             ATM calculation from the listed strikes to plain
                             arithmetic.
@@ -1132,6 +1189,42 @@ def _resolve_options_leg(
         # float(), never int(): VEDL25APR24292.5CE is a real contract, and
         # truncating its strike names one that does not exist.
         target_strike = float(declared)
+    elif strike_mode == "delta":
+        declared = _leg_value(leg, "target_delta", "targetDelta")
+        try:
+            target_delta = float(declared)
+        except (TypeError, ValueError, OverflowError):
+            target_delta = math.nan
+        if not math.isfinite(target_delta) or target_delta == 0 or abs(target_delta) > 1:
+            return _fail_leg(
+                "invalid_target_delta",
+                f"Target delta {declared!r} on a {base_symbol} option leg must be a non-zero number between -1 and 1.",
+                exchange=exchange,
+                expiry=expiry.expiry,
+                expiry_symbol=expiry.expiry_symbol,
+                **context,
+            )
+        target_strike, selected_delta, chain_ltp, error, code = _resolve_delta_strike(
+            base_symbol,
+            underlying_exchange,
+            expiry.expiry_symbol,
+            option_type,
+            target_delta,
+            api_key,
+        )
+        detail["target_delta"] = target_delta
+        detail["selected_delta"] = selected_delta
+        if target_strike is None:
+            return _fail_leg(
+                code or "no_delta_data",
+                error or "Could not select a strike by delta.",
+                exchange=exchange,
+                expiry=expiry.expiry,
+                expiry_symbol=expiry.expiry_symbol,
+                underlying_ltp=chain_ltp,
+                **context,
+            )
+        ltp = chain_ltp
     else:
         offset_raw = _leg_value(leg, "atm_offset", "atmOffset", "offset") or "ATM"
         offset = str(offset_raw).strip().upper()
